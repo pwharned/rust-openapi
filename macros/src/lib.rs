@@ -53,17 +53,15 @@ pub fn add_functions_from_file(attr: TokenStream, item: TokenStream) -> TokenStr
             let impl_name = syn::Ident::new(&func_name, proc_macro2::Span::call_site());
 
             let new_function = quote! {
-                            impl MyStruct {
+                            impl ApiClient {
 
-            async fn #impl_name() -> Result<Value, reqwest::Error> {
+            async fn #impl_name(&self) -> Result<Value, reqwest::Error> {
 
                             let func_name = stringify!(#impl_name);
 
-                            println!("The function name is: {}", format!("{}", func_name));
-
 
                         let client = Client::new();
-                    let response = client.get("https://api.example.com/data")
+                    let response = client.get(self.get_host())
                         .send()
                         .await?;
 
@@ -77,8 +75,6 @@ pub fn add_functions_from_file(attr: TokenStream, item: TokenStream) -> TokenStr
             output.extend(new_function);
         }
     }
-
-    println!("{}", output);
 
     TokenStream::from(output)
 }
@@ -130,11 +126,6 @@ pub fn generate_structs_from_file(attr: TokenStream) -> TokenStream {
 
         output.extend(new_struct);
     }
-
-    // Print the generated code }
-
-    // Print the generated code for debugging
-    println!("{}", output);
 
     TokenStream::from(output)
 }

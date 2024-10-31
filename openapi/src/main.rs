@@ -5,11 +5,13 @@ use reqwest::Error;
 use serde_json::Value;
 generate_structs_from_file!("openapi.json");
 
-struct MyStruct;
+struct ApiClient {
+    host: String,
+}
 #[add_functions_from_file("openapi.json")]
-impl MyStruct {
-    fn existing_function(&self) {
-        println!("This is an existing function.");
+impl ApiClient {
+    fn get_host(&self) -> &str {
+        &self.host // Return a reference to the value
     }
 }
 #[tokio::main]
@@ -21,8 +23,9 @@ async fn main() -> Result<(), Error> {
     };
     println!("Name: {}, Age: {}", person.name, person.id);
 
-    let my_struct = MyStruct;
-    my_struct.existing_function();
-    MyStruct::get_users_by_id().await?; // Calling the new function added by the macro
+    let apiclient = ApiClient {
+        host: "http://localhost.com".to_string(),
+    };
+    apiclient.get_users_by_id().await?; // Calling the new function added by the macro
     Ok(())
 }
