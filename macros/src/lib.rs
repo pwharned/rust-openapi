@@ -1,16 +1,11 @@
 extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::quote;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use syn::{parse_macro_input, ItemImpl};
-#[derive(Deserialize)]
-struct FunctionDefinition {
-    name: String,
-    body: String,
-}
-
 #[proc_macro_attribute]
 pub fn add_functions_from_file(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Parse the attribute input for the file path
@@ -22,27 +17,68 @@ pub fn add_functions_from_file(attr: TokenStream, item: TokenStream) -> TokenStr
 
     // Read the JSON file
     let file_content = fs::read_to_string(file_path).expect("Unable to read file");
-    let functions: Vec<FunctionDefinition> =
-        serde_json::from_str(&file_content).expect("JSON was not well-formatted");
+
+    let openapi: OpenApiSpec =
+        serde_json::from_str(&file_content).expect("Json was not well formatted");
 
     let input = parse_macro_input!(item as ItemImpl);
     let mut output = quote! { #input };
 
+    /*
+    * async fn get_data() -> Result<Value, reqwest::Error> {
+        let client = Client::new();
+        let response = client.get("https://api.example.com/data")
+            .send()
+            .await?;
+
+        let data = response.json::<Value>().await?;
+        Ok(data)
+    }*/
     // Generate functions based on the JSON data
-    for func in functions {
-        let func_name = syn::Ident::new(&func.name, proc_macro2::Span::call_site());
-        let func_body = &func.body;
+    for path_item in openapi.paths.paths {
+        println!("{}", path_item.0);
 
-        let new_function = quote! {
-            impl MyStruct {
-                fn #func_name() {
-                    println!("{}", #func_body);
+        for item in path_item.1.methods {
+            let method_name: &str = item.0.as_ref();
+            let func_name: String = format!(
+                "{}{}",
+                method_name,
+                path_item
+                    .0
+                    .replace('/', "_")
+                    .replace('{', "by_")
+                    .replace('}', ""),
+            );
+
+            let impl_name = syn::Ident::new(&func_name, proc_macro2::Span::call_site());
+
+            let new_function = quote! {
+                            impl MyStruct {
+
+            async fn #impl_name() -> Result<Value, reqwest::Error> {
+
+                            let func_name = stringify!(#impl_name);
+
+                            println!("The function name is: {}", format!("{}", func_name));
+
+
+                        let client = Client::new();
+                    let response = client.get("https://api.example.com/data")
+                        .send()
+                        .await?;
+
+                    let data = response.json::<Value>().await?;
+                    Ok(data)
                 }
-            }
-        };
 
-        output.extend(new_function);
+                            }
+                        };
+
+            output.extend(new_function);
+        }
     }
+
+    println!("{}", output);
 
     TokenStream::from(output)
 }
@@ -136,10 +172,11 @@ struct Paths {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct PathItem {
-    get: Option<Operation>,
-    post: Option<Operation>,
-    put: Option<Operation>,
-    delete: Option<Operation>,
+    #[serde(flatten)]
+    methods: std::collections::HashMap<String, Option<Operation>>,
+    //post: Option<Operation>,
+    //put: Option<Operation>,
+    //delete: Option<Operation>,
     // Add other HTTP methods as needed
 }
 
