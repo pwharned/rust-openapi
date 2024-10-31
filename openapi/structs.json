@@ -1,0 +1,9 @@
+[
+    {
+        "name": "Person",
+        "fields": [
+            { "name": "name", "ty": "String" },
+            { "name": "age", "ty": "u32" }
+        ]
+    }
+]
