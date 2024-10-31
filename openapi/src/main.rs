@@ -1,7 +1,7 @@
 use macros::add_functions_from_file;
 use macros::generate_structs_from_file;
-use reqwest::Client;
 use reqwest::Error;
+use reqwest::{Client, Method};
 use serde_json::Value;
 generate_structs_from_file!("openapi.json");
 
@@ -24,8 +24,8 @@ async fn main() -> Result<(), Error> {
     println!("Name: {}, Age: {}", person.name, person.id);
 
     let apiclient = ApiClient {
-        host: "http://localhost.com".to_string(),
+        host: "http://localhost".to_string(),
     };
-    apiclient.get_users_by_id().await?; // Calling the new function added by the macro
+    apiclient.get_users_by_id(&"hello".to_string()).await?; // Calling the new function added by the macro
     Ok(())
 }

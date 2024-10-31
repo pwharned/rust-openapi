@@ -1,7 +1,7 @@
 extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::quote;
-use reqwest::Client;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -49,19 +49,41 @@ pub fn add_functions_from_file(attr: TokenStream, item: TokenStream) -> TokenStr
                     .replace('{', "by_")
                     .replace('}', ""),
             );
+            let (parts_not_in_brackets, parts_in_brackets) = extract_parts(&path_item.0);
+            let arg_names: Vec<syn::Ident> = parts_in_brackets
+                .iter()
+                .map(|arg| syn::Ident::new(arg, proc_macro2::Span::call_site()))
+                .collect();
+
+            let arg_types: Vec<syn::Type> = parts_in_brackets
+                .iter()
+                .map(|_| syn::parse_str::<syn::Type>("&String").unwrap())
+                .collect();
+
+            let args_iter = arg_names.iter().zip(arg_types.iter());
+            let func_args: Vec<proc_macro2::TokenStream> = args_iter
+                .map(|(name, ty)| {
+                    quote! { #name: #ty }
+                })
+                .collect();
 
             let impl_name = syn::Ident::new(&func_name, proc_macro2::Span::call_site());
-
+            let meth_name = syn::Ident::new(method_name, proc_macro2::Span::call_site());
             let new_function = quote! {
                             impl ApiClient {
 
-            async fn #impl_name(&self) -> Result<Value, reqwest::Error> {
+            async fn #impl_name (&self, #(#func_args),*) -> Result<Value, reqwest::Error> {
 
                             let func_name = stringify!(#impl_name);
+                            let method_name =stringify!(#meth_name);
 
 
+                        let method: Method = Method::from_bytes(method_name.as_bytes() ).unwrap();
                         let client = Client::new();
-                    let response = client.get(self.get_host())
+
+
+                        let req = client.request(method, self.get_host());
+                    let response = req
                         .send()
                         .await?;
 
@@ -128,6 +150,32 @@ pub fn generate_structs_from_file(attr: TokenStream) -> TokenStream {
     }
 
     TokenStream::from(output)
+}
+
+fn extract_parts(path: &str) -> (String, Vec<String>) {
+    let re = Regex::new(r"\{([^}]+)\}").unwrap();
+    let mut parts_in_brackets = Vec::new();
+    let mut parts_not_in_brackets = String::new();
+
+    let mut last_end = 0;
+
+    for cap in re.captures_iter(path) {
+        let start = cap.get(0).unwrap().start();
+        let end = cap.get(0).unwrap().end();
+
+        // Append the part not in brackets
+        parts_not_in_brackets.push_str(&path[last_end..start]);
+
+        // Capture the part in brackets
+        parts_in_brackets.push(cap.get(1).unwrap().as_str().to_string());
+
+        last_end = end;
+    }
+
+    // Append the remaining part not in brackets
+    parts_not_in_brackets.push_str(&path[last_end..]);
+
+    (parts_not_in_brackets, parts_in_brackets)
 }
 
 #[derive(Serialize, Deserialize, Debug)]
