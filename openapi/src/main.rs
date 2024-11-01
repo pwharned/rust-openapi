@@ -2,7 +2,7 @@ use macros::add_functions_from_file;
 use macros::generate_structs_from_file;
 use reqwest::Error;
 use reqwest::{Client, Method};
-use serde_json::Value;
+use serde::Deserialize;
 generate_structs_from_file!("openapi.json");
 
 struct ApiClient {
@@ -24,8 +24,13 @@ async fn main() -> Result<(), Error> {
     println!("Name: {}, Age: {}", person.name, person.id);
 
     let apiclient = ApiClient {
-        host: "http://localhost".to_string(),
+        host: "http://localhost:8080".to_string(),
     };
-    apiclient.get_users_by_id(&"hello".to_string()).await?; // Calling the new function added by the macro
+
+    match apiclient.get_users().await {
+        Ok(data) => println!("{:?}", data),
+        Err(e) => eprintln!("Error: {}", e),
+    }
+
     Ok(())
 }
