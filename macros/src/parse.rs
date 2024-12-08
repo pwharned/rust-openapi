@@ -1,8 +1,56 @@
-use std::sync::Arc;
+use std::{process::Output, sync::Arc};
 
 pub type Parse<'a, Output> = Arc<dyn Fn(&'a str) -> Option<(Output, &'a str)> + 'a + Send + Sync>;
 pub struct Parser<'a, Output> {
     parser: Arc<dyn Fn(&'a str) -> Option<(Output, &'a str)> + 'a + Send + Sync>,
+}
+
+impl<'a, Output: 'a> Parser<'a, Output> {
+    // ... existing methods
+
+    fn one_or_more(self) -> Parser<'a, Vec<Output>>
+    where
+        Output: Clone + 'a,
+    {
+        Parser::new(move |mut input: &'a str| {
+            let mut results = Vec::new();
+
+            // Parse the first occurrence to ensure at least one match
+            if let Some((first_result, remaining_input)) = self.parse(input) {
+                results.push(first_result);
+                input = remaining_input;
+            } else {
+                return None;
+            }
+
+            // Continue parsing while there are more matches
+            while let Some((result, remaining_input)) = self.parse(input) {
+                results.push(result);
+                input = remaining_input;
+            }
+
+            Some((results, input))
+        })
+    }
+
+    fn zero_or_more(self) -> Parser<'a, Vec<Output>>
+    where
+        Output: Clone + 'a,
+    {
+        Parser::new(move |mut input: &'a str| {
+            let mut results = Vec::new();
+
+            // Parse the first occurrence to ensure at least one match
+
+            // Continue parsing while there are more matches
+            while let Some((result, remaining_input)) = self.parse(input) {
+                results.push(result);
+                input = remaining_input;
+            }
+
+            Some((results, input))
+        })
+    }
 }
 
 impl<'a, Output: 'a> Parser<'a, Output> {
@@ -131,9 +179,17 @@ fn until<'a>() -> Parser<'a, &'a str> {
     })
 }
 
-fn column_def<'a>() -> Parser<'a, (&'a str, &'a str)> {
+fn column_def<'a>() -> Parser<'a, (&'a str, &'a str, Vec<&'a str>)> {
     name().and_then(|colname| {
-        whitespace().and_then(move |_| until().map(move |dtype| (colname, dtype)))
+        whitespace().and_then(move |_| {
+            name().and_then(move |dtype| {
+                whitespace().and_then(move |_| {
+                    with_whitespace(name())
+                        .zero_or_more()
+                        .map(move |options| (colname, dtype, options))
+                })
+            })
+        })
     })
 }
 
@@ -154,7 +210,7 @@ fn comma_sep<'a, Output: 'a>(parser: Parser<'a, Output>) -> Parser<'a, Arc<Vec<O
     })
 }
 
-fn column_list<'a>() -> Parser<'a, Arc<Arc<Vec<(&'a str, &'a str)>>>> {
+fn column_list<'a>() -> Parser<'a, Arc<Arc<Vec<(&'a str, &'a str, Vec<&'a str>)>>>> {
     match_char('(')
         .and_then(|_| comma_sep(column_def()))
         .and_then(|cols| {
@@ -164,7 +220,8 @@ fn column_list<'a>() -> Parser<'a, Arc<Arc<Vec<(&'a str, &'a str)>>>> {
         })
 }
 
-pub fn create_table_parser<'a>() -> Parser<'a, (String, Arc<Arc<Vec<(&'a str, &'a str)>>>)> {
+pub fn create_table_parser<'a>(
+) -> Parser<'a, (String, Arc<Arc<Vec<(&'a str, &'a str, Vec<&'a str>)>>>)> {
     with_whitespace(match_string("CREATE"))
         .and_then(|_| with_whitespace(match_string("TABLE")))
         .and_then(|_| name())
@@ -182,11 +239,13 @@ mod tests {
         assert_eq!(result, Some(("*", "")));
 
         let create_table_result =
-            create_table_parser().parse("CREATE TABLE TEST(id int not null, id2 int)");
+            create_table_parser().parse("CREATE TABLE TEST(id int PRIMARY KEY, id2 int)");
 
         println!("{:?}", create_table_result);
-
-        let name_parser = with_whitespace(until());
-        println!("{:?}", name_parser.parse("HELLO,GOODBYE"));
+        let hello_parser = with_whitespace(match_string("HELLO"));
+        let name_parser = hello_parser
+            .zero_or_more()
+            .and_then(move |_| with_whitespace(name()));
+        println!("{:?}", name_parser.parse("HELLO GOODBYE"));
     }
 }

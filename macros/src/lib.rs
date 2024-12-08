@@ -215,7 +215,7 @@ pub fn generate_structs_from_ddl(attr: TokenStream) -> TokenStream {
         let struct_name = syn::Ident::new(&ddl.0 .0, proc_macro2::Span::call_site());
         let columns = ddl.0 .1;
 
-        let fields = columns.iter().map(|(colname, data_type)| {
+        let fields = columns.iter().map(|(colname, data_type, _)| {
             let field_name = syn::Ident::new(colname, proc_macro2::Span::call_site());
 
             let field_type_str = data_type.to_string();
@@ -234,7 +234,7 @@ pub fn generate_structs_from_ddl(attr: TokenStream) -> TokenStream {
 
         let cols = columns
             .iter()
-            .map(|(colname, _)| *colname)
+            .map(|(colname, _, _)| *colname)
             .collect::<Vec<_>>()
             .join(",");
 
