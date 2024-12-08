@@ -1,4 +1,6 @@
 extern crate proc_macro;
+use sqlx::FromRow;
+mod parse;
 use proc_macro::TokenStream;
 use quote::quote;
 use quote::ToTokens;
@@ -183,6 +185,90 @@ pub fn add_functions_from_file(attr: TokenStream, item: TokenStream) -> TokenStr
         }
     }
 
+    //println!("{}", output);
+    TokenStream::from(output)
+}
+#[proc_macro]
+pub fn generate_structs_from_ddl(attr: TokenStream) -> TokenStream {
+    // Parse the attribute input for the file path
+    let relative_path = parse_macro_input!(attr as syn::LitStr).value();
+
+    // Construct the absolute path
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
+    let file_path = PathBuf::from(manifest_dir).join(relative_path);
+
+    // Read the JSON file
+    let file_content = fs::read_to_string(file_path).expect("Unable to read file");
+
+    let sql = file_content.split(";");
+    // Generate structs based on the JSON data
+    let mut output = quote! {};
+
+    for statement in sql.into_iter() {
+        let stmt = parse::create_table_parser().parse(statement);
+        if stmt.is_none() {
+            continue;
+        }
+        //let create_table_result = create_table_parser().parse("CREATE TABLE TEST(id int, id2 int)");
+        let ddl = stmt.unwrap();
+        let table_name = &ddl.0 .0;
+        let struct_name = syn::Ident::new(&ddl.0 .0, proc_macro2::Span::call_site());
+        let columns = ddl.0 .1;
+
+        let fields = columns.iter().map(|(colname, data_type)| {
+            let field_name = syn::Ident::new(colname, proc_macro2::Span::call_site());
+
+            let field_type_str = data_type.to_string();
+            let field_ty: syn::Type = match field_type_str.as_str() {
+                "VARCHAR" => syn::parse_str("String").expect("Invalid type"),
+                "INT" => syn::parse_str("i32").expect("Invalid type"),
+                "BOOL" => syn::parse_str("bool").expect("Invalid type"),
+                // Handle other cases as needed
+                _ => syn::parse_str("String").expect("Invalid type"),
+            };
+
+            quote! {
+                pub #field_name: Option<#field_ty>,
+            }
+        });
+
+        let cols = columns
+            .iter()
+            .map(|(colname, _)| *colname)
+            .collect::<Vec<_>>()
+            .join(",");
+
+        let select = "SELECT ".to_owned() + &cols.to_owned() + " FROM " + &table_name.to_owned();
+
+        let new_struct = quote! {
+            #[derive(Deserialize,Serialize,Debug,sqlx::FromRow)]
+            pub struct #struct_name {
+                #(#fields)*
+            }
+        };
+
+        let get = "get".to_owned() + &table_name;
+
+        let getfunctionname = syn::Ident::new(&get, proc_macro2::Span::call_site());
+        let new_function = quote! {
+
+
+            async fn #getfunctionname (pool: &sqlx::postgres::PgPool) -> Result<Vec<#struct_name>, sqlx::Error> {
+
+        let rows: Vec<#struct_name> =  sqlx::query_as::<_,#struct_name>(#select).fetch_all(pool).await?;
+
+
+
+
+        Ok(rows)
+
+
+                            }
+                        };
+
+        output.extend(new_struct);
+        output.extend(new_function);
+    }
     println!("{}", output);
     TokenStream::from(output)
 }

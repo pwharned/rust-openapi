@@ -1,9 +1,11 @@
 use macros::add_functions_from_file;
+use macros::generate_structs_from_ddl;
 use macros::generate_structs_from_file;
 use reqwest::Error;
 use reqwest::{Client, Method};
 use serde::Deserialize;
 generate_structs_from_file!("openapi.json");
+//generate_structs_from_ddl!("ddl.sql");
 
 struct ApiClient {
     host: String,

@@ -1,0 +1,1 @@
+CREATE TABLE TEST(id INT, id2 INT);
