@@ -111,9 +111,29 @@ fn name<'a>() -> Parser<'a, &'a str> {
         }
     })
 }
+
+fn until<'a>() -> Parser<'a, &'a str> {
+    Parser::new(|input: &'a str| {
+        let chars = input.chars();
+        let mut end = 0;
+        for c in chars {
+            if c != ',' {
+                end += c.len_utf8();
+            } else {
+                break;
+            }
+        }
+        if end > 0 {
+            Some((&input[..end], &input[end..]))
+        } else {
+            None
+        }
+    })
+}
+
 fn column_def<'a>() -> Parser<'a, (&'a str, &'a str)> {
     name().and_then(|colname| {
-        whitespace().and_then(move |_| name().map(move |dtype| (colname, dtype)))
+        whitespace().and_then(move |_| until().map(move |dtype| (colname, dtype)))
     })
 }
 
@@ -161,8 +181,12 @@ mod tests {
         println!("{:?}", result);
         assert_eq!(result, Some(("*", "")));
 
-        let create_table_result = create_table_parser().parse("CREATE TABLE TEST(id int, id2 int)");
+        let create_table_result =
+            create_table_parser().parse("CREATE TABLE TEST(id int not null, id2 int)");
 
-        println!("{:?}", create_table_result.unwrap().0 .0);
+        println!("{:?}", create_table_result);
+
+        let name_parser = with_whitespace(until());
+        println!("{:?}", name_parser.parse("HELLO,GOODBYE"));
     }
 }

@@ -247,27 +247,71 @@ pub fn generate_structs_from_ddl(attr: TokenStream) -> TokenStream {
             }
         };
 
-        let get = "get".to_owned() + &table_name;
+        let get = "get_".to_owned() + &table_name.to_lowercase();
 
         let getfunctionname = syn::Ident::new(&get, proc_macro2::Span::call_site());
         let new_function = quote! {
 
-
             async fn #getfunctionname (pool: &sqlx::postgres::PgPool) -> Result<Vec<#struct_name>, sqlx::Error> {
 
         let rows: Vec<#struct_name> =  sqlx::query_as::<_,#struct_name>(#select).fetch_all(pool).await?;
-
-
-
 
         Ok(rows)
 
 
                             }
                         };
+        let route = "/".to_owned() + table_name;
+        let get_handler_function_name = "get_".to_owned() + &table_name.to_lowercase() + "_handler";
+        let get_handler_function_name_syn =
+            syn::Ident::new(&get_handler_function_name, proc_macro2::Span::call_site());
+        let get_handler = quote! {
+        #[get(#route)]
+        async fn #get_handler_function_name_syn(pool: web::Data<PgPool>) -> impl Responder {
+            let res: Vec<#struct_name> = #getfunctionname(pool.get_ref()).await.unwrap();
+            let mut response = HttpResponse::Ok();
+            response.insert_header(("Content-Type", "application/json"));
+            response.json(res)
+        }
+            };
+
+        let post_handler_function_name =
+            "post_".to_owned() + &table_name.to_lowercase() + "_handler";
+        let post_handler_function_name_syn =
+            syn::Ident::new(&post_handler_function_name, proc_macro2::Span::call_site());
+        let post_handler = quote! {
+        #[post(#route)]
+        async fn #post_handler_function_name_syn(record: web::Json<#struct_name>, pool: web::Data<PgPool>) -> impl Responder {
+
+                let json = serde_json::to_value(record).unwrap();
+                let fields: Vec<&str> = json.as_object().unwrap().keys().map(|s| s.as_str()).collect();
+                let placeholders: Vec<String> = (1..=fields.len()).map(|i| format!("${}", i)).collect();
+                let values: Vec<&serde_json::Value> = json.as_object().unwrap().values().collect();
+                let query = format!( "INSERT INTO {} ({}) VALUES ({})", #table_name, fields.join(", "), placeholders.join(", ") );
+                let mut query_builder = sqlx::query(&query);
+                for (i, value) in values.iter().enumerate() {
+                    query_builder = match value {
+                        serde_json::Value::String(s) => query_builder.bind(s),
+                        serde_json::Value::Number(n) if n.is_i64() => query_builder.bind(n.as_i64().unwrap()),
+                        serde_json::Value::Number(n) if n.is_f64() => query_builder.bind(n.as_f64().unwrap()),
+                        serde_json::Value::Bool(b) => query_builder.bind(*b),
+                        _ => query_builder,
+                    };
+                }
+
+                println!("{}", "Processing data");
+                query_builder.execute(pool.get_ref()).await;
+
+            let mut response = HttpResponse::Ok();
+            response.insert_header(("Content-Type", "application/json"));
+                response.json(json)
+        }
+            };
 
         output.extend(new_struct);
         output.extend(new_function);
+        output.extend(get_handler);
+        output.extend(post_handler);
     }
     println!("{}", output);
     TokenStream::from(output)
