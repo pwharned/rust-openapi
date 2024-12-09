@@ -1,4 +1,4 @@
-use actix_web::{delete, get, post, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{delete, get, patch, post, web, App, HttpResponse, HttpServer, Responder};
 use macros::generate_structs_from_ddl;
 use serde::Deserialize;
 use serde::Serialize;
@@ -22,6 +22,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(web::Data::new(pool.clone()))
             .service(get_test_handler)
+            .service(update_test_handler)
             .service(post_test_handler)
             .service(get_test_by_id_handler)
             .service(delete_test_by_id_handler)

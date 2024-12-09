@@ -236,9 +236,7 @@ pub fn generate_structs_from_ddl(attr: TokenStream) -> TokenStream {
             let field_name = syn::Ident::new(colname, proc_macro2::Span::call_site());
 
             quote! {
-                if !self.#field_name.is_none(){
-                    fields.push(#colname);
-                }
+                   .bind(json.#field_name)
             }
         });
         let fields3 = columns.iter().map(|(colname, _, _)| {
@@ -271,21 +269,39 @@ pub fn generate_structs_from_ddl(attr: TokenStream) -> TokenStream {
         };
 
         let new_struct2 = quote! {
-                impl #struct_name {
+                       impl #struct_name {
 
 
-        pub fn non_null_fields(&self) -> Vec<(&str, &dyn std::fmt::Debug)>{
+               pub fn non_null_fields(&self) -> Vec<(&str, &dyn std::fmt::Debug)>{
 
-                    let mut fields = Vec::new();
-                    #(#fields3)*
-                    fields
-                }
-                }
+                           let mut fields = Vec::new();
+                           #(#fields3)*
+                           fields
+                       }
+        pub fn bind_fields(&self,  sqlx_query:&mut sqlx::query::Query<sqlx::Postgres, sqlx::postgres::PgArguments> ) -> (){
 
-            };
+                          // #(#fields2)*
+                       }
+
+
+
+
+                       }
+
+                   };
 
         for k in primary_key {
             let key = k.0;
+            let inner_fields = columns
+                .iter()
+                .filter(|(colname, _, _)| *colname != key)
+                .map(|(colname, _, _)| {
+                    let field_name = syn::Ident::new(colname, proc_macro2::Span::call_site());
+
+                    quote! {
+                           .bind(json.#field_name.unwrap())
+                    }
+                });
 
             let select = "SELECT ".to_owned()
                 + &cols.to_owned()
@@ -340,40 +356,41 @@ pub fn generate_structs_from_ddl(attr: TokenStream) -> TokenStream {
 
             output.extend(get_handler);
             output.extend(delete_handler);
+
+            let update = "update_".to_owned() + &table_name.to_lowercase();
+            let route = "/".to_owned() + table_name + "/" + "{" + key + "}";
+            let update_handler_function_name = update + "_handler";
+
+            let update_handler_function_name_syn = syn::Ident::new(
+                &update_handler_function_name,
+                proc_macro2::Span::call_site(),
+            );
+
+            let update_handler = quote! {
+                                                                            #[patch(#route)]
+                                                                            async fn #update_handler_function_name_syn(path: web::Path<#struct_name>, json: web::Json<#struct_name>, pool: web::Data<PgPool>) -> impl Responder {
+                                                                        let active_fields : Vec<(&str, &dyn std::fmt::Debug)>= json.non_null_fields();
+                                                                        let fields_length  = active_fields.len();
+                                                                let insert_sql = "UPDATE ".to_owned() + &#table_name.to_owned()
+                                                                                + " set " + &active_fields.into_iter().enumerate().filter(|(index, (name, value)) | *name!=#key ). map(|(index,(name,value)) | format!(" {} = ${} ", &name.to_string(), index+2)).collect::<Vec<_>>().join(" ").to_owned()
+                                                                                + " where "
+                                                                                 + #key + &format!(" = ${} ", fields_length).to_string();
+                        println!("{}",insert_sql);
+                                            let v= path.into_inner();
+
+                                    let mut sqlx_query: sqlx::query::Query<sqlx::Postgres, sqlx::postgres::PgArguments> = sqlx::query(&insert_sql).bind(&v.#key_syn) #(#inner_fields)*;
+                                            let result = sqlx_query.execute( pool.get_ref()).await;
+                    println!("{}", json.id2.unwrap());
+            match result { Ok(res) => { println!("Query executed successfully: {:?}", res); } Err(e) => {  println!("Error executing query: {:?}", e); } }
+
+                                                                                let mut response = HttpResponse::Ok();
+                                                                                //response.insert_header(("Content-Type", "application/json"));
+                                                                                //response.json(res)
+                                                                                response
+                                                                            }
+                                                                                };
+            output.extend(update_handler);
         }
-        let insert = "insert_".to_owned() + &table_name.to_lowercase();
-        let route = "/".to_owned() + table_name;
-        let insert_handler_function_name = insert + "_handler";
-
-        let insert_handler_function_name_syn = syn::Ident::new(
-            &insert_handler_function_name,
-            proc_macro2::Span::call_site(),
-        );
-
-        let insert_handler = quote! {
-                                #[post(#route)]
-                                async fn #insert_handler_function_name_syn(path: web::Path<#struct_name>, json: web::Json<#struct_name>, pool: web::Data<PgPool>) -> impl Responder {
-                            let active_fields = json.get_active_fields();
-                            let fields_length  = active_fields.len();
-                            let placeholders =    (0..fields_length as i32).map(|i| format!("${}", &i)).collect();
-                            let json_value = serde_json::to_value(self).unwrap();
-                    let insert_sql = "INSERT INTO ".to_owned() + &#table_name.to_owned()
-                                    + "( " + &json.get_active_fields().to_owned()
-                                    + " ) VALUES(" + placeholders
-                                     + ")";
-
-                            let mut sqlx_query = sqlx::query(&query);
-
-        for binding in json.bindings() { sqlx_query = sqlx_query.bind(binding); }
-
-                                    let res = sqlx_query.execute( pool.get_ref()).await.unwrap();
-                                    let mut response = HttpResponse::Ok();
-                                    //response.insert_header(("Content-Type", "application/json"));
-                                    //response.json(res)
-                                    response
-                                }
-                                    };
-
         let select = "SELECT ".to_owned() + &cols.to_owned() + " FROM " + &table_name.to_owned();
 
         let get = "get_".to_owned() + &table_name.to_lowercase();
