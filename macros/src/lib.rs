@@ -270,6 +270,20 @@ pub fn generate_structs_from_ddl(attr: TokenStream) -> TokenStream {
 
         };
 
+        let new_struct2 = quote! {
+                impl #struct_name {
+
+
+        pub fn non_null_fields(&self) -> Vec<(&str, &dyn std::fmt::Debug)>{
+
+                    let mut fields = Vec::new();
+                    #(#fields3)*
+                    fields
+                }
+                }
+
+            };
+
         for k in primary_key {
             let key = k.0;
 
@@ -424,6 +438,7 @@ pub fn generate_structs_from_ddl(attr: TokenStream) -> TokenStream {
             };
 
         output.extend(new_struct);
+        output.extend(new_struct2);
         output.extend(new_function);
         output.extend(get_handler);
         output.extend(post_handler);
