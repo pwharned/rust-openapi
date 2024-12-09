@@ -290,7 +290,7 @@ pub fn generate_structs_from_ddl(attr: TokenStream) -> TokenStream {
 
                    };
 
-        for k in primary_key {
+        for k in &primary_key {
             let key = k.0;
             let inner_fields = columns
                 .iter()
@@ -425,12 +425,13 @@ pub fn generate_structs_from_ddl(attr: TokenStream) -> TokenStream {
             "post_".to_owned() + &table_name.to_lowercase() + "_handler";
         let post_handler_function_name_syn =
             syn::Ident::new(&post_handler_function_name, proc_macro2::Span::call_site());
+        let key = &primary_key[0].0;
         let post_handler = quote! {
         #[post(#route)]
         async fn #post_handler_function_name_syn(record: web::Json<#struct_name>, pool: web::Data<PgPool>) -> impl Responder {
 
                 let json = serde_json::to_value(record).unwrap();
-                let fields: Vec<&str> = json.as_object().unwrap().keys().map(|s| s.as_str()).collect();
+                let fields: Vec<&str> = json.as_object().unwrap().keys().map(|s| s.as_str()) .collect();
                 let placeholders: Vec<String> = (1..=fields.len()).map(|i| format!("${}", i)).collect();
                 let values: Vec<&serde_json::Value> = json.as_object().unwrap().values().collect();
                 let query = format!( "INSERT INTO {} ({}) VALUES ({})", #table_name, fields.join(", "), placeholders.join(", ") );
