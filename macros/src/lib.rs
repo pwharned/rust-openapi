@@ -232,20 +232,135 @@ pub fn generate_structs_from_ddl(attr: TokenStream) -> TokenStream {
             }
         });
 
+        let fields2 = columns.iter().map(|(colname, _, _)| {
+            let field_name = syn::Ident::new(colname, proc_macro2::Span::call_site());
+
+            quote! {
+                if !self.#field_name.is_none(){
+                    fields.push(#colname);
+                }
+            }
+        });
+        let fields3 = columns.iter().map(|(colname, _, _)| {
+            let field_name = syn::Ident::new(colname, proc_macro2::Span::call_site());
+
+            quote! {
+                if !self.#field_name.is_none(){
+                    fields.push((#colname, &self.#field_name as &dyn std::fmt::Debug) );
+                }
+            }
+        });
+
         let cols = columns
             .iter()
             .map(|(colname, _, _)| *colname)
             .collect::<Vec<_>>()
             .join(",");
-
-        let select = "SELECT ".to_owned() + &cols.to_owned() + " FROM " + &table_name.to_owned();
+        let primary_key: Vec<(&str, &str)> = columns
+            .iter()
+            .filter(|(_, _, options)| !options.is_empty())
+            .map(move |(colname, _, pkey)| (*colname, pkey[0]))
+            .collect();
 
         let new_struct = quote! {
             #[derive(Deserialize,Serialize,Debug,sqlx::FromRow)]
             pub struct #struct_name {
                 #(#fields)*
             }
+
         };
+
+        for k in primary_key {
+            let key = k.0;
+
+            let select = "SELECT ".to_owned()
+                + &cols.to_owned()
+                + " FROM "
+                + &table_name.to_owned()
+                + " WHERE "
+                + key
+                + " = $1";
+            let del =
+                "DELETE FROM ".to_owned() + &table_name.to_owned() + " WHERE " + key + " = $1";
+
+            let get = "get_".to_owned() + &table_name.to_lowercase() + "_by_" + key;
+            let route = "/".to_owned() + table_name + "/" + "{" + key + "}";
+            let get_handler_function_name = get + "_handler";
+
+            let get_handler_function_name_syn =
+                syn::Ident::new(&get_handler_function_name, proc_macro2::Span::call_site());
+
+            let key_syn = syn::Ident::new(key, proc_macro2::Span::call_site());
+            let get_handler = quote! {
+            #[get(#route)]
+            async fn #get_handler_function_name_syn(path: web::Path<#struct_name>, pool: web::Data<PgPool>) -> impl Responder {
+                    println!("{}", #select);
+                    let v = path.into_inner();
+                let res: Vec<#struct_name> = sqlx::query_as::<_,#struct_name>(#select).bind(v.#key_syn).fetch_all( pool.get_ref()).await.unwrap();
+                let mut response = HttpResponse::Ok();
+                response.insert_header(("Content-Type", "application/json"));
+                response.json(res)
+            }
+                };
+            let delete = "delete_".to_owned() + &table_name.to_lowercase() + "_by_" + key;
+            let route = "/".to_owned() + table_name + "/" + "{" + key + "}";
+            let delete_handler_function_name = delete + "_handler";
+
+            let delete_handler_function_name_syn = syn::Ident::new(
+                &delete_handler_function_name,
+                proc_macro2::Span::call_site(),
+            );
+
+            let delete_handler = quote! {
+            #[delete(#route)]
+            async fn #delete_handler_function_name_syn(path: web::Path<#struct_name>, pool: web::Data<PgPool>) -> impl Responder {
+                    println!("{}", #del);
+                    let v = path.into_inner();
+                let res = sqlx::query(#del).bind(v.#key_syn).execute( pool.get_ref()).await.unwrap();
+                let mut response = HttpResponse::Ok();
+                //response.insert_header(("Content-Type", "application/json"));
+                //response.json(res)
+                response
+            }
+                };
+
+            output.extend(get_handler);
+            output.extend(delete_handler);
+        }
+        let insert = "insert_".to_owned() + &table_name.to_lowercase();
+        let route = "/".to_owned() + table_name;
+        let insert_handler_function_name = insert + "_handler";
+
+        let insert_handler_function_name_syn = syn::Ident::new(
+            &insert_handler_function_name,
+            proc_macro2::Span::call_site(),
+        );
+
+        let insert_handler = quote! {
+                                #[post(#route)]
+                                async fn #insert_handler_function_name_syn(path: web::Path<#struct_name>, json: web::Json<#struct_name>, pool: web::Data<PgPool>) -> impl Responder {
+                            let active_fields = json.get_active_fields();
+                            let fields_length  = active_fields.len();
+                            let placeholders =    (0..fields_length as i32).map(|i| format!("${}", &i)).collect();
+                            let json_value = serde_json::to_value(self).unwrap();
+                    let insert_sql = "INSERT INTO ".to_owned() + &#table_name.to_owned()
+                                    + "( " + &json.get_active_fields().to_owned()
+                                    + " ) VALUES(" + placeholders
+                                     + ")";
+
+                            let mut sqlx_query = sqlx::query(&query);
+
+        for binding in json.bindings() { sqlx_query = sqlx_query.bind(binding); }
+
+                                    let res = sqlx_query.execute( pool.get_ref()).await.unwrap();
+                                    let mut response = HttpResponse::Ok();
+                                    //response.insert_header(("Content-Type", "application/json"));
+                                    //response.json(res)
+                                    response
+                                }
+                                    };
+
+        let select = "SELECT ".to_owned() + &cols.to_owned() + " FROM " + &table_name.to_owned();
 
         let get = "get_".to_owned() + &table_name.to_lowercase();
 

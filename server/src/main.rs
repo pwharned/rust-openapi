@@ -1,11 +1,11 @@
-use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{delete, get, post, web, App, HttpResponse, HttpServer, Responder};
 use macros::generate_structs_from_ddl;
 use serde::Deserialize;
 use serde::Serialize;
 use sqlx::postgres::PgPool;
+use sqlx::query;
 use std::error::Error;
 use std::future::Future;
-
 generate_structs_from_ddl!("../openapi/ddl.sql");
 
 pub async fn create_pool() -> PgPool {
@@ -23,6 +23,8 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(pool.clone()))
             .service(get_test_handler)
             .service(post_test_handler)
+            .service(get_test_by_id_handler)
+            .service(delete_test_by_id_handler)
     })
     .bind("127.0.0.1:8080")?
     .run()

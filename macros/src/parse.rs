@@ -184,7 +184,7 @@ fn column_def<'a>() -> Parser<'a, (&'a str, &'a str, Vec<&'a str>)> {
         whitespace().and_then(move |_| {
             name().and_then(move |dtype| {
                 whitespace().and_then(move |_| {
-                    with_whitespace(name())
+                    with_whitespace(match_string("PRIMARY KEY"))
                         .zero_or_more()
                         .map(move |options| (colname, dtype, options))
                 })
@@ -247,5 +247,10 @@ mod tests {
             .zero_or_more()
             .and_then(move |_| with_whitespace(name()));
         println!("{:?}", name_parser.parse("HELLO GOODBYE"));
+
+        let primary_key_parser =
+            with_whitespace(match_string("PRIMARY KEY")).and_then(move |_| with_whitespace(name()));
+        let result = primary_key_parser.parse("PRIMARY KEY ID");
+        println!("{:?}", result);
     }
 }
