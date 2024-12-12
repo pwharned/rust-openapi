@@ -20,3 +20,5 @@ proc-macro = true
 
 [parse]
 proc-macro = true
+
+[tests]

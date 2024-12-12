@@ -211,14 +211,14 @@ pub fn generate_structs_from_ddl(attr: TokenStream) -> TokenStream {
         }
         //let create_table_result = create_table_parser().parse("CREATE TABLE TEST(id int, id2 int)");
         let ddl = stmt.unwrap();
-        let table_name = &ddl.0 .0;
-        let struct_name = syn::Ident::new(&ddl.0 .0, proc_macro2::Span::call_site());
-        let columns = ddl.0 .1;
+        let table_name = &ddl.0.name;
+        let struct_name = syn::Ident::new(&ddl.0.name, proc_macro2::Span::call_site());
+        let columns = ddl.0.columns;
 
-        let fields = columns.iter().map(|(colname, data_type, _)| {
-            let field_name = syn::Ident::new(colname, proc_macro2::Span::call_site());
+        let fields = columns.iter().map(|col| {
+            let field_name = syn::Ident::new(&col.name, proc_macro2::Span::call_site());
 
-            let field_type_str = data_type.to_string();
+            let field_type_str = col.dtype.to_string();
             let field_ty: syn::Type = match field_type_str.as_str() {
                 "VARCHAR" => syn::parse_str("String").expect("Invalid type"),
                 "INT" => syn::parse_str("i32").expect("Invalid type"),
@@ -232,16 +232,16 @@ pub fn generate_structs_from_ddl(attr: TokenStream) -> TokenStream {
             }
         });
 
-        let fields2 = columns.iter().map(|(colname, _, _)| {
-            let field_name = syn::Ident::new(colname, proc_macro2::Span::call_site());
+        let fields2 = columns.iter().map(|col| {
+            let field_name = syn::Ident::new(&col.name, proc_macro2::Span::call_site());
 
             quote! {
                    .bind(json.#field_name)
             }
         });
-        let fields3 = columns.iter().map(|(colname, _, _)| {
+        let fields3 = columns.iter().map(|col| {
+            let colname = &col.name;
             let field_name = syn::Ident::new(colname, proc_macro2::Span::call_site());
-
             quote! {
                 if !self.#field_name.is_none(){
                     fields.push((#colname, &self.#field_name as &dyn std::fmt::Debug) );
@@ -251,13 +251,13 @@ pub fn generate_structs_from_ddl(attr: TokenStream) -> TokenStream {
 
         let cols = columns
             .iter()
-            .map(|(colname, _, _)| *colname)
+            .map(|col| col.name.clone())
             .collect::<Vec<_>>()
             .join(",");
-        let primary_key: Vec<(&str, &str)> = columns
+        let primary_key: Vec<parse::Column> = columns
             .iter()
-            .filter(|(_, _, options)| !options.is_empty())
-            .map(move |(colname, _, pkey)| (*colname, pkey[0]))
+            .filter(|col| !col.constraints.is_empty())
+            .map(move |col| col.clone())
             .collect();
 
         let new_struct = quote! {
@@ -290,18 +290,16 @@ pub fn generate_structs_from_ddl(attr: TokenStream) -> TokenStream {
 
                    };
 
-        for k in &primary_key {
-            let key = k.0;
-            let inner_fields = columns
-                .iter()
-                .filter(|(colname, _, _)| *colname != key)
-                .map(|(colname, _, _)| {
-                    let field_name = syn::Ident::new(colname, proc_macro2::Span::call_site());
+        for col in primary_key {
+            let name = col.name;
+            let key: &str = &name;
+            let inner_fields = columns.iter().filter(|col| col.name != *key).map(|col| {
+                let field_name = syn::Ident::new(&col.name, proc_macro2::Span::call_site());
 
-                    quote! {
-                           .bind(json.#field_name.unwrap())
-                    }
-                });
+                quote! {
+                       .bind(json.#field_name.unwrap())
+                }
+            });
 
             let select = "SELECT ".to_owned()
                 + &cols.to_owned()
@@ -425,7 +423,6 @@ pub fn generate_structs_from_ddl(attr: TokenStream) -> TokenStream {
             "post_".to_owned() + &table_name.to_lowercase() + "_handler";
         let post_handler_function_name_syn =
             syn::Ident::new(&post_handler_function_name, proc_macro2::Span::call_site());
-        let key = &primary_key[0].0;
         let post_handler = quote! {
         #[post(#route)]
         async fn #post_handler_function_name_syn(record: web::Json<#struct_name>, pool: web::Data<PgPool>) -> impl Responder {
