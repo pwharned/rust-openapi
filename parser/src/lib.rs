@@ -35,9 +35,13 @@ pub struct ForeignKey {
 pub struct Table {
     pub name: String,
     pub columns: Vec<Column>,
-    pub constraints: Vec<String>,
+    pub constraints: Vec<Constraint>,
 }
-
+#[derive(Debug, Clone)]
+pub enum ConstraintOrColumn {
+    Constraint(Constraint),
+    Column(Column),
+}
 pub type Parse<'a, Output> = Arc<dyn Fn(&'a str) -> Option<(Output, &'a str)> + 'a + Send + Sync>;
 pub struct Parser<'a, Output> {
     parser: Arc<dyn Fn(&'a str) -> Option<(Output, &'a str)> + 'a + Send + Sync>,
@@ -127,7 +131,7 @@ impl<'a, Output: 'a> Parser<'a, Output> {
         })
     }
 
-    pub fn or(self, other: Parser<'a, Output>) -> Self {
+    pub fn or(self, other: Parser<'a, Output>) -> Parser<'a, Output> {
         Parser::new(move |input| self.parse(input).or_else(|| other.parse(input)))
     }
 }
@@ -221,42 +225,49 @@ fn until<'a>() -> Parser<'a, &'a str> {
     })
 }
 
-pub fn primary_key<'a>() -> Parser<'a, Constraint> {
+pub fn primary_key<'a>() -> Parser<'a, ConstraintOrColumn> {
     with_whitespace(match_string("PRIMARY KEY")).and_then(move |_| {
         with_whitespace(match_char('('))
             .and_then(|_| comma_sep(with_whitespace(name())))
             .and_then({
                 move |defs| {
                     match_char(')').map(move |_| {
-                        Constraint::PrimaryKey(PrimaryKey {
+                        ConstraintOrColumn::Constraint(Constraint::PrimaryKey(PrimaryKey {
                             columns: defs.to_vec().into_iter().map(|s| s.to_string()).collect(),
-                        })
+                        }))
                     })
                 }
             })
     })
 }
-pub fn unique<'a>() -> Parser<'a, Constraint> {
+pub fn unique<'a>() -> Parser<'a, ConstraintOrColumn> {
     with_whitespace(match_string("UNIQUE")).and_then(move |_| {
         with_whitespace(match_char('('))
             .and_then(|_| comma_sep(with_whitespace(name())))
             .and_then({
                 move |defs| {
                     match_char(')').map(move |_| {
-                        Constraint::Unique(Unique {
+                        ConstraintOrColumn::Constraint(Constraint::Unique(Unique {
                             columns: defs.to_vec().into_iter().map(|s| s.to_string()).collect(),
-                        })
+                        }))
                     })
                 }
             })
     })
 }
 
-pub fn constraint_parser<'a>() -> Parser<'a, Constraint> {
-    with_whitespace(match_string("CONSTRAINT"))
-        .and_then({ move |_| foreign_key().or(primary_key()) })
+pub fn constraint<'a>() -> Parser<'a, ConstraintOrColumn> {
+    with_whitespace(match_string("CONSTRAINT")).and_then({
+        move |_| with_whitespace(name()).and_then(|_| foreign_key().or(primary_key()).or(unique()))
+    })
 }
-pub fn foreign_key<'a>() -> Parser<'a, Constraint> {
+
+pub fn schema_name_table_name<'a>() -> Parser<'a, &'a str> {
+    with_whitespace(name())
+        .and_then(move |_| with_whitespace(match_char('.')).and_then(|_| name()))
+        .or(with_whitespace(name()))
+}
+pub fn foreign_key<'a>() -> Parser<'a, ConstraintOrColumn> {
     with_whitespace(match_string("FOREIGN KEY")).and_then(move |_| {
         with_whitespace(match_char('('))
             .and_then(|_| comma_sep(with_whitespace(name())))
@@ -266,7 +277,7 @@ pub fn foreign_key<'a>() -> Parser<'a, Constraint> {
                         with_whitespace(match_string("REFERENCES")).and_then({
                             let defs2 = defs.clone();
                             move |_| {
-                                with_whitespace(name()).and_then({
+                                with_whitespace(schema_name_table_name()).and_then({
                                     let def3 = defs2.clone();
                                     move |tablename| {
                                         with_whitespace(match_char('(')).and_then({
@@ -278,7 +289,7 @@ pub fn foreign_key<'a>() -> Parser<'a, Constraint> {
                                                         match_char(')').map({
                                                             let def6 = def5.clone();
                                                             move |_| {
-                                                                Constraint::ForeignKey(ForeignKey {
+                                                               ConstraintOrColumn::Constraint(Constraint::ForeignKey(ForeignKey {
                                                                     source_columns: def6
                                                                         .to_vec()
                                                                         .into_iter()
@@ -291,7 +302,7 @@ pub fn foreign_key<'a>() -> Parser<'a, Constraint> {
                                                                         .into_iter()
                                                                         .map(|s| s.to_string())
                                                                         .collect::<Vec<String>>(),
-                                                                })
+                                                                }))
                                                             }
                                                         })
                                                     }
@@ -308,7 +319,15 @@ pub fn foreign_key<'a>() -> Parser<'a, Constraint> {
     })
 }
 
-fn column_def<'a>() -> Parser<'a, Column> {
+pub fn function<'a>() -> Parser<'a, &'a str> {
+    with_whitespace(name())
+        .and_then(move |functionname| match_char('('))
+        .and_then(|_| match match_char(')') {
+            Some(a) => () -> functionname,
+            None => () -> None,
+        })
+}
+pub fn column<'a>() -> Parser<'a, ConstraintOrColumn> {
     with_whitespace(name()).and_then(|colname| {
         with_whitespace(name()).and_then(move |dtype| {
             // Capture default value if present
@@ -332,12 +351,17 @@ fn column_def<'a>() -> Parser<'a, Column> {
 
                         constraint_parser.map({
                             let value_final = value.clone();
-                            move |constraints| Column {
-                                name: colname.to_string(),
-                                dtype: dtype.to_string(),
-                                default: value_final.clone(), // No need to clone here
-                                not_null,
-                                options: constraints.into_iter().map(|s| s.to_string()).collect(),
+                            move |constraints| {
+                                ConstraintOrColumn::Column(Column {
+                                    name: colname.to_string(),
+                                    dtype: dtype.to_string(),
+                                    default: value_final.clone(), // No need to clone here
+                                    not_null,
+                                    options: constraints
+                                        .into_iter()
+                                        .map(|s| s.to_string())
+                                        .collect(),
+                                })
                             }
                         })
                     }
@@ -347,11 +371,12 @@ fn column_def<'a>() -> Parser<'a, Column> {
     })
 }
 
-pub fn column_list<'a>() -> Parser<'a, Arc<Vec<Column>>> {
+pub fn column_list<'a>() -> Parser<'a, Arc<Vec<ConstraintOrColumn>>> {
     with_whitespace(match_char('('))
-        .and_then(|_| comma_sep(column_def()))
+        .and_then(|_| comma_sep(constraint().or(column())))
         .and_then(move |cols| with_whitespace(match_char(')')).map(move |_| Arc::clone(&cols)))
 }
+
 pub fn comma_sep<'a, Output: 'a>(parser: Parser<'a, Output>) -> Parser<'a, Arc<Vec<Output>>> {
     Parser::new(move |input: &'a str| {
         let mut result = Vec::new();
@@ -379,28 +404,20 @@ pub fn create_table_parser<'a>() -> Parser<'a, Table> {
                 .or(with_whitespace(name()))
         })
         .and_then(move |table_name| {
-            whitespace().and_then(move |_| {
-                column_list().and_then(move |columns| {
-                    whitespace().and_then(move |_| {
-                        // Capture table constraints
-                        //
-                        let columns_arc: Arc<Vec<Column>> = Arc::clone(&columns); // Explicit type
-                        let constraint_parser = with_whitespace(match_string("CONSTRAINT"))
-                            .and_then(|_| with_whitespace(name()))
-                            .and_then(move |constraint_name| {
-                                until().map(move |definition| {
-                                    format!("{} {}", constraint_name, definition)
-                                })
-                            })
-                            .zero_or_more();
-
-                        constraint_parser.map(move |constraints| Table {
-                            name: table_name.to_string(),
-                            columns: columns_arc.to_vec(),
-                            constraints: constraints.into_iter().map(|s| s.to_string()).collect(),
-                        })
-                    })
-                })
+            column_list().map(move |columns| {
+                let mut column_defs = Vec::new();
+                let mut constraints = Vec::new();
+                for result in columns.iter().cloned() {
+                    match result {
+                        ConstraintOrColumn::Column(cd) => column_defs.push(cd),
+                        ConstraintOrColumn::Constraint(c) => constraints.push(c),
+                    }
+                }
+                Table {
+                    name: table_name.to_string(),
+                    columns: column_defs.to_vec(),
+                    constraints: constraints.to_vec(),
+                }
             })
         })
 }
