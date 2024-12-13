@@ -28,7 +28,7 @@ CREATE TABLE public.collections (
 	updated_at timestamptz DEFAULT now() NOT NULL,
 	collection_description text NOT NULL,
 	collection_owner text NOT NULL,
-	collection_collaborators _text NULL,
+	collection_collaborators text NULL,
 	CONSTRAINT asset_collections_collection_name_key UNIQUE (collection_name),
 	CONSTRAINT asset_collections_pkey PRIMARY KEY (collection_id)
 );
@@ -78,7 +78,6 @@ CREATE TABLE public.assets (
 	asset_practice text NOT NULL,
 	is_ip_cleared bool DEFAULT false NULL,
 	is_sellable bool DEFAULT false NULL,
-	asset_rating_avg float8 DEFAULT 0.0 NULL,
 	asset_collaborators _text NULL,
 	CONSTRAINT assets_asset_name_key UNIQUE (asset_name),
 	CONSTRAINT assets_pkey PRIMARY KEY (asset_id),
