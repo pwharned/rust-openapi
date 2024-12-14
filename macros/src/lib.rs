@@ -1,11 +1,11 @@
 extern crate proc_macro;
-use sqlx::FromRow;
-mod parse;
+use parse;
 use proc_macro::TokenStream;
 use quote::quote;
 use quote::ToTokens;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
 use std::fs;
 use std::path::PathBuf;
 use syn::LitStr;
