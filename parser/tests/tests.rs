@@ -1,6 +1,6 @@
 use parse::{
-    comma_sep, create_table_parser, foreign_key, match_char, match_string, name, with_whitespace,
-    ForeignKey,
+    comma_sep, constraint_parser, create_table_parser, foreign_key, match_char, match_string, name,
+    with_whitespace, ForeignKey,
 };
 use std::sync::Arc;
 mod tests {
@@ -16,6 +16,14 @@ mod tests {
         assert_eq!(result, Some(("*", "")));
     }
 
+    #[test]
+    fn test_constraint_parser() {
+        let constraint = " CONSTRAINT asset_types_pkey PRIMARY KEY (type_id), CONSTRAINT asset_types_type_name_key UNIQUE (type_name)  ";
+        match comma_sep(constraint_parser()).parse(constraint) {
+            Some(a) => println!("{:?}", a),
+            None => panic!("Did not parse constraint {:?} ", constraint),
+        }
+    }
     #[test]
     fn testOrParser() {
         let or = match_string("HELLO")
@@ -36,19 +44,30 @@ mod tests {
         let references_parser = with_whitespace(match_string("REFERENCES"));
 
         let result = foreign_key().parse(commavals);
+        match result {
+            Some(a) => println!("{:?}", a),
+            None => panic!("Did not parse"),
+        }
     }
 
     #[test]
     fn test_create_table_parser() {
-        let create_table_result = parse::create_table_parser()
+        let result = parse::create_table_parser()
             .parse(" CREATE TABLE TEST ( id int PRIMARY KEY , id2 int NOT NULL ) ");
 
-        println!("{:?}", create_table_result);
+        match result {
+            Some(a) => println!("{:?}", a),
+            None => panic!("Did not parse"),
+        }
 
         let psql = "  CREATE TABLE public.asset_types ( type_id text NOT NULL, type_name text NOT NULL, CONSTRAINT asset_types_pkey PRIMARY KEY (type_id), CONSTRAINT asset_types_type_name_key UNIQUE (type_name) )";
         println!("{:?}", &psql);
         let pres = create_table_parser().parse(&psql);
-        println!("{:?}", pres);
+
+        match pres {
+            Some(a) => println!("{:?}", a),
+            None => panic!("Did not parse"),
+        }
 
         let relative_path = "../openapi/ddl.sql";
 

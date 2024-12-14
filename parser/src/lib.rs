@@ -35,7 +35,7 @@ pub struct ForeignKey {
 pub struct Table {
     pub name: String,
     pub columns: Vec<Column>,
-    pub constraints: Vec<String>,
+    pub constraints: Vec<Constraint>,
 }
 
 pub type Parse<'a, Output> = Arc<dyn Fn(&'a str) -> Option<(Output, &'a str)> + 'a + Send + Sync>;
@@ -253,8 +253,9 @@ pub fn unique<'a>() -> Parser<'a, Constraint> {
 }
 
 pub fn constraint_parser<'a>() -> Parser<'a, Constraint> {
-    with_whitespace(match_string("CONSTRAINT"))
-        .and_then({ move |_| foreign_key().or(primary_key()) })
+    with_whitespace(match_string("CONSTRAINT")).and_then({
+        move |_| with_whitespace(name()).and_then(|_| foreign_key().or(primary_key()).or(unique()))
+    })
 }
 pub fn foreign_key<'a>() -> Parser<'a, Constraint> {
     with_whitespace(match_string("FOREIGN KEY")).and_then(move |_| {
@@ -350,8 +351,15 @@ fn column_def<'a>() -> Parser<'a, Column> {
 pub fn column_list<'a>() -> Parser<'a, Arc<Vec<Column>>> {
     with_whitespace(match_char('('))
         .and_then(|_| comma_sep(column_def()))
-        .and_then(move |cols| with_whitespace(match_char(')')).map(move |_| Arc::clone(&cols)))
+        .map(move |cols| Arc::clone(&cols))
 }
+
+pub fn constraint_list<'a>() -> Parser<'a, Arc<Vec<Constraint>>> {
+    comma_sep(constraint_parser()).and_then(move |constraints| {
+        with_whitespace(match_char(')')).map(move |_| Arc::clone(&constraints))
+    })
+}
+
 pub fn comma_sep<'a, Output: 'a>(parser: Parser<'a, Output>) -> Parser<'a, Arc<Vec<Output>>> {
     Parser::new(move |input: &'a str| {
         let mut result = Vec::new();
@@ -381,24 +389,16 @@ pub fn create_table_parser<'a>() -> Parser<'a, Table> {
         .and_then(move |table_name| {
             whitespace().and_then(move |_| {
                 column_list().and_then(move |columns| {
-                    whitespace().and_then(move |_| {
+                    constraint_list().map(move |constraints| {
                         // Capture table constraints
                         //
                         let columns_arc: Arc<Vec<Column>> = Arc::clone(&columns); // Explicit type
-                        let constraint_parser = with_whitespace(match_string("CONSTRAINT"))
-                            .and_then(|_| with_whitespace(name()))
-                            .and_then(move |constraint_name| {
-                                until().map(move |definition| {
-                                    format!("{} {}", constraint_name, definition)
-                                })
-                            })
-                            .zero_or_more();
 
-                        constraint_parser.map(move |constraints| Table {
+                        Table {
                             name: table_name.to_string(),
                             columns: columns_arc.to_vec(),
-                            constraints: constraints.into_iter().map(|s| s.to_string()).collect(),
-                        })
+                            constraints: constraints.to_vec(),
+                        }
                     })
                 })
             })
